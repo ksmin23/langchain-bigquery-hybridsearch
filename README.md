@@ -148,21 +148,31 @@ bq --location=US mk --dataset your-gcp-project-id:test_hybridsearch
 uv pip install langchain-google-vertexai
 ```
 
-#### 5. Run Integration Tests
+#### 5. Configure Environment Variables
+
+Copy the template and fill in your values:
 
 ```bash
-# Required
-export PROJECT_ID=your-gcp-project-id
+cp tests/.env.example tests/.env
+```
 
-# Optional (defaults shown)
-export DATASET_NAME=test_hybridsearch
-export LOCATION=US
-# TABLE_NAME is auto-generated per run
+```bash
+# tests/.env
+GOOGLE_CLOUD_PROJECT="your-gcp-project-id"
+GOOGLE_CLOUD_LOCATION="us-central1"
 
+BIGQUERY_LOCATION="us-central1"
+BIGQUERY_DATASET="test_hybridsearch"
+BIGQUERY_TABLE="hybrid_test"   # optional, auto-generated if not set
+```
+
+#### 6. Run Integration Tests
+
+```bash
 pytest tests/integration_tests/ -v -m integration
 ```
 
-#### 6. Cleanup
+#### 7. Cleanup
 
 The test fixture deletes the test table automatically after each run.
 To remove the dataset entirely:

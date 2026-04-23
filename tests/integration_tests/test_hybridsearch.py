@@ -3,11 +3,8 @@
 These tests require a live BigQuery connection and GCP credentials.
 Run with: pytest tests/integration_tests/ -m integration
 
-Set the following environment variables before running:
-    PROJECT_ID      – GCP project ID
-    DATASET_NAME    – BigQuery dataset (will be created if missing)
-    TABLE_NAME      – BigQuery table name for test data
-    LOCATION        – BigQuery location (default: US)
+Environment variables are loaded from .env file via conftest.py
+(see tests/.env.example for the template).
 """
 
 from __future__ import annotations
@@ -18,10 +15,12 @@ from typing import Generator
 
 import pytest
 
-PROJECT_ID = os.environ.get("PROJECT_ID", "")
-DATASET_NAME = os.environ.get("DATASET_NAME", "test_hybridsearch")
-TABLE_NAME = os.environ.get("TABLE_NAME", f"hybrid_test_{uuid.uuid4().hex[:8]}")
-LOCATION = os.environ.get("LOCATION", "US")
+GOOGLE_CLOUD_PROJECT = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
+GOOGLE_CLOUD_LOCATION = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
+BIGQUERY_LOCATION = os.environ.get("BIGQUERY_LOCATION", "us-central1")
+BIGQUERY_DATASET = os.environ.get("BIGQUERY_DATASET", "test_hybridsearch")
+BIGQUERY_TABLE = os.environ.get("BIGQUERY_TABLE", f"hybrid_test_{uuid.uuid4().hex[:8]}")
+EMBEDDING_MODEL_NAME = os.environ.get("EMBEDDING_MODEL_NAME", "gemini-embedding-001")
 
 
 @pytest.fixture(scope="module")
@@ -31,9 +30,9 @@ def embedding_model():
         from langchain_google_vertexai import VertexAIEmbeddings
 
         return VertexAIEmbeddings(
-            model_name="text-embedding-005",
-            project=PROJECT_ID,
-            location=LOCATION,
+            model_name=EMBEDDING_MODEL_NAME,
+            project=GOOGLE_CLOUD_PROJECT,
+            location=GOOGLE_CLOUD_LOCATION,
         )
     except ImportError:
         pytest.skip("langchain-google-vertexai not installed")
@@ -41,16 +40,16 @@ def embedding_model():
 
 @pytest.fixture(scope="module")
 def store(embedding_model) -> Generator:
-    if not PROJECT_ID:
-        pytest.skip("PROJECT_ID not set")
+    if not GOOGLE_CLOUD_PROJECT:
+        pytest.skip("GOOGLE_CLOUD_PROJECT not set")
 
     from langchain_bigquery_hybridsearch import BigQueryHybridSearchVectorStore
 
     vs = BigQueryHybridSearchVectorStore(
-        project_id=PROJECT_ID,
-        dataset_name=DATASET_NAME,
-        table_name=TABLE_NAME,
-        location=LOCATION,
+        project_id=GOOGLE_CLOUD_PROJECT,
+        dataset_name=BIGQUERY_DATASET,
+        table_name=BIGQUERY_TABLE,
+        location=BIGQUERY_LOCATION,
         embedding=embedding_model,
         distance_type="COSINE",
         search_analyzer="LOG_ANALYZER",
@@ -79,8 +78,11 @@ def store(embedding_model) -> Generator:
     try:
         from google.cloud import bigquery
 
-        client = bigquery.Client(project=PROJECT_ID, location=LOCATION)
-        client.delete_table(f"{PROJECT_ID}.{DATASET_NAME}.{TABLE_NAME}", not_found_ok=True)
+        client = bigquery.Client(project=GOOGLE_CLOUD_PROJECT, location=BIGQUERY_LOCATION)
+        client.delete_table(
+            f"{GOOGLE_CLOUD_PROJECT}.{BIGQUERY_DATASET}.{BIGQUERY_TABLE}",
+            not_found_ok=True,
+        )
     except Exception:
         pass
 
