@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langchain-bigquery-hybridsearch"
+version = "0.1.0"
+description = "BigQuery Hybrid Search extension for langchain-google-community"
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "langchain-google-community[featurestore]>=3.0.0,<4.0.0",
+    "langchain-core>=1.2.0,<2.0.0",
+    "google-cloud-bigquery>=3.21.0,<4.0.0",
+    "numpy>=1.26.0,<3.0.0",
+    "pydantic>=2.7.0,<3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0,<9.0.0",
+    "pytest-asyncio>=0.23.0,<1.0.0",
+    "pytest-mock>=3.12.0,<4.0.0",
+    "ruff>=0.14.0,<1.0.0",
+    "mypy>=1.10.0,<2.0.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/langchain_bigquery_hybridsearch"]
+
+[tool.ruff]
+fix = true
+line-length = 100
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.mypy]
+disallow_untyped_defs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config -v"
+markers = [
+    "integration: mark tests as integration tests requiring BigQuery access",
+]
+asyncio_mode = "auto"
