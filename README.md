@@ -79,12 +79,96 @@ All parameters from `BigQueryVectorStore` (`distance_type`, `extra_fields`, etc.
 
 ## Testing
 
-```bash
-# Unit tests (no GCP credentials needed)
-pytest tests/unit_tests/ -v
+### Unit Tests
 
-# Integration tests (requires GCP credentials)
-PROJECT_ID=your-gcp-project-id pytest tests/integration_tests/ -v -m integration
+No GCP credentials needed:
+
+```bash
+pytest tests/unit_tests/ -v
+```
+
+### Integration Tests
+
+#### 1. Prerequisites
+
+- Google Cloud SDK (`gcloud`) installed and authenticated
+- A GCP project with billing enabled
+- The following APIs enabled:
+  - BigQuery API
+  - Vertex AI API (for embedding model)
+
+```bash
+gcloud auth application-default login
+gcloud config set project your-gcp-project-id
+
+# Enable required APIs
+gcloud services enable bigquery.googleapis.com
+gcloud services enable aiplatform.googleapis.com
+```
+
+#### 2. IAM Permissions
+
+The authenticated account needs these roles (or equivalent permissions):
+
+| Role | Purpose |
+|------|---------|
+| `roles/bigquery.dataEditor` | Create/delete tables, insert data |
+| `roles/bigquery.jobUser` | Run queries (VECTOR_SEARCH, SEARCH) |
+| `roles/bigquery.dataViewer` | Read table data and metadata |
+| `roles/aiplatform.user` | Access Vertex AI embedding models |
+
+```bash
+# Example: grant roles to your account
+PROJECT_ID=your-gcp-project-id
+ACCOUNT=$(gcloud config get account)
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="user:$ACCOUNT" \
+  --role="roles/bigquery.dataEditor"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="user:$ACCOUNT" \
+  --role="roles/bigquery.jobUser"
+```
+
+#### 3. BigQuery Dataset Setup
+
+The test fixture creates tables automatically, but the dataset must exist or the authenticated account must have `bigquery.datasets.create` permission.
+
+```bash
+# Option A: Let the test create the dataset automatically (requires bigquery.datasets.create)
+
+# Option B: Create the dataset manually
+bq --location=US mk --dataset your-gcp-project-id:test_hybridsearch
+```
+
+#### 4. Install Additional Dependencies
+
+```bash
+uv pip install langchain-google-vertexai
+```
+
+#### 5. Run Integration Tests
+
+```bash
+# Required
+export PROJECT_ID=your-gcp-project-id
+
+# Optional (defaults shown)
+export DATASET_NAME=test_hybridsearch
+export LOCATION=US
+# TABLE_NAME is auto-generated per run
+
+pytest tests/integration_tests/ -v -m integration
+```
+
+#### 6. Cleanup
+
+The test fixture deletes the test table automatically after each run.
+To remove the dataset entirely:
+
+```bash
+bq rm --dataset --force your-gcp-project-id:test_hybridsearch
 ```
 
 ## References
