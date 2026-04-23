@@ -84,7 +84,7 @@ All parameters from `BigQueryVectorStore` (`distance_type`, `extra_fields`, etc.
 pytest tests/unit_tests/ -v
 
 # Integration tests (requires GCP credentials)
-PROJECT_ID=my-project pytest tests/integration_tests/ -v -m integration
+PROJECT_ID=your-gcp-project-id pytest tests/integration_tests/ -v -m integration
 ```
 
 ## References
