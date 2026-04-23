@@ -59,7 +59,7 @@ Runs both searches independently and combines results:
 
 ```
 Query → VECTOR_SEARCH() → vector_rank ─┐
-                                        ├→ RRF score → top-k
+                                       ├→ RRF score → top-k
 Query → SEARCH()         → text_rank  ─┘
 ```
 
