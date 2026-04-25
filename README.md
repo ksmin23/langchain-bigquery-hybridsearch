@@ -81,11 +81,39 @@ All parameters from `BigQueryVectorStore` (`distance_type`, `extra_fields`, etc.
 
 ### Unit Tests
 
-No GCP credentials needed:
+No GCP credentials needed. Unit tests use mocks to verify SQL generation logic.
+
+#### 1. Install dev dependencies
 
 ```bash
-pytest tests/unit_tests/ -v
+uv venv  # if .venv does not exist yet
+uv pip install -e ".[dev]"
 ```
+
+The `dev` extra installs `pytest`, `pytest-asyncio`, `pytest-mock`, and `python-dotenv`.
+
+#### 2. Run unit tests
+
+```bash
+# All unit tests
+pytest tests/unit_tests/ -v
+
+# A single file
+pytest tests/unit_tests/test_sql_generation.py -v
+
+# A single test function
+pytest tests/unit_tests/test_sql_generation.py::<test_function_name> -v
+
+# Filter by keyword
+pytest tests/unit_tests/ -v -k "rrf"
+
+# Exclude integration tests explicitly
+pytest tests/unit_tests/ -v -m "not integration"
+```
+
+Notes:
+- `tests/conftest.py` auto-loads `tests/.env` via `python-dotenv`, but unit tests run without any env vars.
+- `pytest-asyncio` is configured with `asyncio_mode = "auto"`, so async tests need no decorator.
 
 ### Integration Tests
 
