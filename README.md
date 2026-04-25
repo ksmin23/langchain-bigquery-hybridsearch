@@ -77,6 +77,40 @@ RRF score: `1/(k + vector_rank) + 1/(k + text_rank)` where `k` defaults to 60.
 
 All parameters from `BigQueryVectorStore` (`distance_type`, `extra_fields`, etc.) are also supported.
 
+## Score Semantics
+
+The numeric meaning of `score` returned by `*_with_score` methods depends on which mode is used. The two cases below are intentionally opposite, so always check the mode before comparing scores across calls.
+
+### Pre-filter mode and inherited similarity search — smaller is more similar
+
+Both `BigQueryHybridSearchVectorStore.hybrid_search_with_score()` (in **pre-filter** mode) and the inherited `BigQueryVectorStore.similarity_search_with_score()` map BigQuery's `distance` column directly to `score`:
+
+```sql
+SELECT base.*, distance AS score
+FROM VECTOR_SEARCH(..., distance_type => "COSINE", ...)
+ORDER BY score          -- ascending; smaller distance first
+```
+
+For all three `distance_type` values BigQuery normalizes the result so that *smaller is closer*:
+
+| `distance_type` | distance returned | interpretation |
+|---|---|---|
+| `EUCLIDEAN` (default of base store) | `‖a − b‖` (L2) | smaller = more similar |
+| `COSINE` | `1 − cos(θ)` | smaller = more similar |
+| `DOT_PRODUCT` | `−(a·b)` (negated) | smaller = more similar |
+
+Note that this differs from the typical LangChain convention (where larger score = more similar, e.g. Chroma, Pinecone). The behavior comes from `langchain-google-community`'s `BigQueryVectorStore` and is preserved by this hybrid extension for consistency.
+
+### RRF mode — larger is more relevant
+
+In `hybrid_search_with_score(..., hybrid_search_mode="rrf")` the score is the Reciprocal Rank Fusion sum:
+
+```
+rrf_score = 1/(k + vector_rank) + 1/(k + text_rank)
+```
+
+A document that ranks high in either retriever contributes a larger reciprocal, so **higher RRF score = stronger combined evidence**. Results are returned in descending order of this score.
+
 ## Testing
 
 ### Unit Tests
