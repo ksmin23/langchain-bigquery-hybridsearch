@@ -173,3 +173,114 @@ class TestFallbackBehavior:
             hybrid_search_mode="pre_filter",
         )
         assert len(results) > 0
+
+
+# ------------------------------------------------------------------
+# Embedding task types
+# ------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def store_qa(embedding_model) -> Generator:
+    """Store whose query and document embeddings both use QUESTION_ANSWERING.
+
+    Verifies that the task_type is honored end-to-end (ingestion + search)
+    and that documents embedded with a non-default task type can still be
+    retrieved.
+    """
+    if not GOOGLE_CLOUD_PROJECT:
+        pytest.skip("GOOGLE_CLOUD_PROJECT not set")
+
+    from langchain_bigquery_hybridsearch import BigQueryHybridSearchVectorStore
+
+    qa_table_name = f"hybrid_qa_{uuid.uuid4().hex[:8]}"
+    vs = BigQueryHybridSearchVectorStore(
+        project_id=GOOGLE_CLOUD_PROJECT,
+        dataset_name=BIGQUERY_DATASET,
+        table_name=qa_table_name,
+        location=BIGQUERY_LOCATION,
+        embedding=embedding_model,
+        distance_type="COSINE",
+        search_analyzer="LOG_ANALYZER",
+        query_task_type="QUESTION_ANSWERING",
+        document_task_type="QUESTION_ANSWERING",
+    )
+    vs.add_texts(
+        texts=[
+            "BigQuery is a serverless data warehouse by Google Cloud.",
+            "VECTOR_SEARCH finds semantically similar embeddings in BigQuery.",
+            "The SEARCH function performs full-text keyword matching.",
+        ],
+        metadatas=[
+            {"source": "docs", "topic": "bigquery"},
+            {"source": "docs", "topic": "vector"},
+            {"source": "docs", "topic": "search"},
+        ],
+    )
+    yield vs
+
+    try:
+        from google.cloud import bigquery
+
+        client = bigquery.Client(
+            project=GOOGLE_CLOUD_PROJECT, location=BIGQUERY_LOCATION
+        )
+        client.delete_table(
+            f"{GOOGLE_CLOUD_PROJECT}.{BIGQUERY_DATASET}.{qa_table_name}",
+            not_found_ok=True,
+        )
+    except Exception:
+        pass
+
+
+@pytest.mark.integration
+class TestEmbeddingTaskType:
+    """End-to-end checks that ``query_task_type`` / ``document_task_type``
+    reach the Vertex / Gemini embeddings API without error and return results.
+    """
+
+    def test_per_call_query_task_type_override(self, store) -> None:
+        """Per-call override on a default-configured store."""
+        results = store.hybrid_search(
+            query="What is a serverless data warehouse?",
+            text_query="serverless",
+            k=3,
+            query_task_type="QUESTION_ANSWERING",
+        )
+        assert len(results) > 0
+
+    def test_per_call_overrides_instance_field(self, store_qa) -> None:
+        """Per-call value should win over the store's instance-level field."""
+        results = store_qa.hybrid_search(
+            query="distributed database",
+            text_query="VECTOR_SEARCH",
+            k=3,
+            query_task_type="SEMANTIC_SIMILARITY",
+        )
+        assert len(results) > 0
+
+    def test_qa_round_trip(self, store_qa) -> None:
+        """Documents embedded with QUESTION_ANSWERING should be retrievable
+        with a query embedded using the same task type.
+        """
+        results = store_qa.hybrid_search(
+            query="What does the SEARCH function do?",
+            text_query="SEARCH",
+            k=3,
+        )
+        assert len(results) > 0
+        assert any(
+            "SEARCH" in doc.page_content for doc in results
+        )
+
+    def test_with_score_carries_task_type(self, store_qa) -> None:
+        """``hybrid_search_with_score`` path also routes the task type."""
+        results = store_qa.hybrid_search_with_score(
+            query="How are embeddings compared?",
+            text_query="VECTOR_SEARCH",
+            k=3,
+            hybrid_search_mode="rrf",
+        )
+        assert len(results) > 0
+        for doc, score in results:
+            assert isinstance(score, float)
