@@ -74,8 +74,81 @@ RRF score: `1/(k + vector_rank) + 1/(k + text_rank)` where `k` defaults to 60.
 | `search_analyzer_options` | `str` | `None` | Analyzer options (JSON) |
 | `hybrid_search_mode` | `str` | `pre_filter` | Default mode |
 | `rrf_k` | `int` | `60` | RRF constant |
+| `query_task_type` | `Optional[str]` | `None` | Task type for query embeddings |
+| `document_task_type` | `Optional[str]` | `None` | Task type for document embeddings |
 
 All parameters from `BigQueryVectorStore` (`distance_type`, `extra_fields`, etc.) are also supported.
+
+## Embedding Task Types
+
+Vertex AI / Google Generative AI embedding models accept a [task type](https://cloud.google.com/vertex-ai/generative-ai/docs/embeddings/task-types) hint that tunes the embedding for a specific downstream use case. The same text produces different vectors depending on the task type, so matching the type on both the indexing and query sides usually improves retrieval quality.
+
+| Task type | Typical use |
+|-----------|-------------|
+| `RETRIEVAL_QUERY` / `RETRIEVAL_DOCUMENT` | Asymmetric retrieval (default for Google embeddings) |
+| `QUESTION_ANSWERING` | Q&A retrieval — set on **both** sides |
+| `FACT_VERIFICATION` | Claim verification — set on **both** sides |
+| `SEMANTIC_SIMILARITY` | Symmetric similarity — set on **both** sides |
+| `CODE_RETRIEVAL_QUERY` | Code search — set on the **query** side only |
+
+When `query_task_type` / `document_task_type` is left as `None`, the embedding model's own default is used (`RETRIEVAL_QUERY` for queries, `RETRIEVAL_DOCUMENT` for documents in the Google integrations).
+
+The store works with both `langchain-google-genai` (which uses the `task_type` kwarg) and the deprecated `langchain-google-vertexai` (which uses `embeddings_task_type`); the right kwarg is detected automatically. Embeddings without any task-type kwarg log a warning once and continue without it.
+
+### Instance-level configuration
+
+```python
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_bigquery_hybridsearch import BigQueryHybridSearchVectorStore
+
+# Q&A retrieval — same task type on both sides
+store = BigQueryHybridSearchVectorStore(
+    project_id="my-project",
+    dataset_name="my_dataset",
+    table_name="docs",
+    embedding=GoogleGenerativeAIEmbeddings(model="gemini-embedding-001"),
+    query_task_type="QUESTION_ANSWERING",
+    document_task_type="QUESTION_ANSWERING",
+    hybrid_search_mode="rrf",
+)
+```
+
+```python
+# Code search — only the query side differs
+store = BigQueryHybridSearchVectorStore(
+    ...,
+    query_task_type="CODE_RETRIEVAL_QUERY",
+    # document_task_type=None → falls back to RETRIEVAL_DOCUMENT
+)
+```
+
+### Per-call override
+
+The kwargs on `hybrid_search`, `hybrid_search_with_score`, and `add_texts` win over the instance-level fields:
+
+```python
+results = store.hybrid_search(
+    query="How does VECTOR_SEARCH work?",
+    text_query="VECTOR_SEARCH",
+    k=10,
+    query_task_type="QUESTION_ANSWERING",
+)
+
+ids = store.add_texts(
+    texts=["def foo(): ...", "class Bar: ..."],
+    document_task_type="CODE_RETRIEVAL_QUERY",
+)
+```
+
+### Retriever path
+
+```python
+retriever = store.as_retriever(
+    search_type="hybrid",
+    search_kwargs={"k": 4, "query_task_type": "FACT_VERIFICATION"},
+)
+docs = retriever.invoke("Earth orbits the Sun.")
+```
 
 ## Score Semantics
 
