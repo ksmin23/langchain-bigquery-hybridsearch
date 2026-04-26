@@ -91,7 +91,7 @@ Vertex AI / Google Generative AI embedding models accept a [task type](https://c
 | `SEMANTIC_SIMILARITY` | Symmetric similarity — set on **both** sides |
 | `CODE_RETRIEVAL_QUERY` | Code search — set on the **query** side only |
 
-When `query_task_type` / `document_task_type` is left as `None`, the embedding model's own default is used (`RETRIEVAL_QUERY` for queries, `RETRIEVAL_DOCUMENT` for documents in the Google integrations).
+When `query_task_type` / `document_task_type` is left as `None`, the embedding model's own default is used (`RETRIEVAL_QUERY` for queries, `RETRIEVAL_DOCUMENT` for documents in the Google integrations). In particular, if you configure the task type on the embedding instance itself — e.g. `GoogleGenerativeAIEmbeddings(model=..., task_type="QUESTION_ANSWERING")` — leaving the store fields as `None` preserves that setting; the store does not override it.
 
 The store works with both `langchain-google-genai` (which uses the `task_type` kwarg) and the deprecated `langchain-google-vertexai` (which uses `embeddings_task_type`); the right kwarg is detected automatically. Embeddings without any task-type kwarg log a warning once and continue without it.
 
