@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from datetime import datetime, timedelta
+from functools import lru_cache
 from threading import Lock, Thread
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     ClassVar,
     Collection,
     Dict,
@@ -36,6 +39,64 @@ logger = logging.getLogger(__name__)
 
 _search_index_lock = Lock()
 _SEARCH_INDEX_CHECK_INTERVAL = timedelta(seconds=60)
+
+_TASK_TYPE_KWARG_CANDIDATES: Tuple[str, ...] = ("task_type", "embeddings_task_type")
+
+
+@lru_cache(maxsize=128)
+def _resolve_task_type_kwarg(
+    qualname: str, params: Tuple[str, ...]
+) -> Optional[str]:
+    """Return the kwarg name an embedding method accepts for task type.
+
+    Different LangChain Google embedding integrations use different parameter
+    names: ``GoogleGenerativeAIEmbeddings`` uses ``task_type`` whereas
+    ``VertexAIEmbeddings`` uses ``embeddings_task_type``. Cached per
+    method qualname so introspection runs only once per embedding method.
+
+    Returns ``None`` if neither kwarg is accepted.
+    """
+    for candidate in _TASK_TYPE_KWARG_CANDIDATES:
+        if candidate in params:
+            return candidate
+    return None
+
+
+def _call_with_task_type(
+    method: Callable[..., Any],
+    arg: Union[str, List[str]],
+    task_type: Optional[str],
+) -> Any:
+    """Invoke an embedding ``embed_query``/``embed_documents`` with task type.
+
+    When ``task_type`` is ``None`` the method is called as-is, preserving the
+    embedding's own default. Otherwise, the method's signature is inspected
+    to find a compatible kwarg (``task_type`` or ``embeddings_task_type``).
+    Embeddings without such a kwarg get a single warning and run without it.
+    """
+    if task_type is None:
+        return method(arg)
+
+    try:
+        sig = inspect.signature(method)
+        kwarg = _resolve_task_type_kwarg(
+            method.__qualname__, tuple(sig.parameters.keys())
+        )
+    except (TypeError, ValueError):
+        kwarg = None
+
+    if kwarg is None:
+        owner = getattr(method, "__self__", None)
+        owner_name = type(owner).__name__ if owner is not None else "embedding"
+        logger.warning(
+            "%s.%s does not accept a task_type kwarg; ignoring task_type=%r",
+            owner_name,
+            getattr(method, "__name__", "embed"),
+            task_type,
+        )
+        return method(arg)
+
+    return method(arg, **{kwarg: task_type})
 
 
 class BigQueryHybridSearchRetriever(VectorStoreRetriever):
@@ -112,6 +173,29 @@ class BigQueryHybridSearchVectorStore(BigQueryVectorStore):
     rrf_k: int = 60
     """RRF constant.  Higher values reduce the gap between top and lower ranks."""
 
+    query_task_type: Optional[str] = None
+    """Task type to use when embedding queries.
+
+    When ``None`` (default), the embedding model's own default is used
+    (``RETRIEVAL_QUERY`` for Google embeddings).  Set this to override —
+    e.g. ``"QUESTION_ANSWERING"``, ``"FACT_VERIFICATION"``,
+    ``"SEMANTIC_SIMILARITY"``, or ``"CODE_RETRIEVAL_QUERY"``.
+
+    Only applies when the embedding model accepts a ``task_type`` (or
+    ``embeddings_task_type``) kwarg; otherwise a warning is logged and the
+    setting is ignored.
+
+    See https://cloud.google.com/vertex-ai/generative-ai/docs/embeddings/task-types
+    """
+
+    document_task_type: Optional[str] = None
+    """Task type to use when embedding documents in :meth:`add_texts`.
+
+    When ``None`` (default), the embedding model's own default is used
+    (``RETRIEVAL_DOCUMENT`` for Google embeddings).  Mirrors
+    :attr:`query_task_type` and follows the same compatibility rules.
+    """
+
     _have_search_index: bool = False
     _creating_search_index: bool = False
     _last_search_index_check: datetime = datetime.min
@@ -158,6 +242,7 @@ class BigQueryHybridSearchVectorStore(BigQueryVectorStore):
         text_query: Optional[str] = None,
         filter: Optional[Union[Dict[str, Any], str]] = None,
         hybrid_search_mode: Optional[Literal["pre_filter", "rrf"]] = None,
+        query_task_type: Optional[str] = None,
         **kwargs: Any,
     ) -> List[Document]:
         """Hybrid search combining keyword and vector similarity.
@@ -170,6 +255,7 @@ class BigQueryHybridSearchVectorStore(BigQueryVectorStore):
             text_query: Separate keyword query.  Falls back to *query*.
             filter: Metadata filter (dict or SQL WHERE clause).
             hybrid_search_mode: Override instance default.
+            query_task_type: Per-call override for :attr:`query_task_type`.
 
         Returns:
             Documents ranked by the chosen hybrid strategy.
@@ -181,6 +267,7 @@ class BigQueryHybridSearchVectorStore(BigQueryVectorStore):
             text_query=text_query,
             filter=filter,
             hybrid_search_mode=hybrid_search_mode,
+            query_task_type=query_task_type,
             **kwargs,
         )
         return [doc for doc, _ in results]
@@ -193,6 +280,7 @@ class BigQueryHybridSearchVectorStore(BigQueryVectorStore):
         text_query: Optional[str] = None,
         filter: Optional[Union[Dict[str, Any], str]] = None,
         hybrid_search_mode: Optional[Literal["pre_filter", "rrf"]] = None,
+        query_task_type: Optional[str] = None,
         **kwargs: Any,
     ) -> List[Tuple[Document, float]]:
         """Same as :meth:`hybrid_search` but also returns scores."""
@@ -203,6 +291,7 @@ class BigQueryHybridSearchVectorStore(BigQueryVectorStore):
             text_query=text_query,
             filter=filter,
             hybrid_search_mode=hybrid_search_mode,
+            query_task_type=query_task_type,
             **kwargs,
         )
 
@@ -218,13 +307,17 @@ class BigQueryHybridSearchVectorStore(BigQueryVectorStore):
         text_query: Optional[str],
         filter: Optional[Union[Dict[str, Any], str]],
         hybrid_search_mode: Optional[Literal["pre_filter", "rrf"]],
+        query_task_type: Optional[str] = None,
         **kwargs: Any,
     ) -> List[Tuple[Document, float]]:
         from google.cloud import bigquery  # type: ignore[attr-defined]
 
         mode = hybrid_search_mode or self.hybrid_search_mode
         resolved_text_query = text_query or query
-        embedding = self.embedding.embed_query(query)
+        effective_task_type = query_task_type or self.query_task_type
+        embedding = _call_with_task_type(
+            self.embedding.embed_query, query, effective_task_type
+        )
         options = kwargs.get("options", None)
 
         if mode == "pre_filter":
@@ -492,6 +585,33 @@ LIMIT {k}
             logger.warning("Search index creation failed: %s", exc)
         finally:
             self._creating_search_index = False
+
+    # ------------------------------------------------------------------
+    # Document ingestion
+    # ------------------------------------------------------------------
+
+    @override
+    def add_texts(  # type: ignore[override]
+        self,
+        texts: List[str],
+        metadatas: Optional[List[dict]] = None,
+        *,
+        document_task_type: Optional[str] = None,
+        **kwargs: Any,
+    ) -> List[str]:
+        """Embed *texts* and store them.
+
+        Mirrors the parent implementation but routes the embedding call
+        through :func:`_call_with_task_type` so :attr:`document_task_type`
+        (or the per-call ``document_task_type`` kwarg) is honored.
+        """
+        effective_task_type = document_task_type or self.document_task_type
+        embs = _call_with_task_type(
+            self.embedding.embed_documents, list(texts), effective_task_type
+        )
+        return self.add_texts_with_embeddings(
+            texts=texts, embs=embs, metadatas=metadatas, **kwargs
+        )
 
     # ------------------------------------------------------------------
     # Class methods
