@@ -316,6 +316,10 @@ To remove the dataset entirely:
 bq rm --dataset --force your-gcp-project-id:test_hybridsearch
 ```
 
+## Related Projects
+
+- [langchain-bigquery-python](https://github.com/ksmin23/langchain-bigquery-python) -- Unified `langchain-bigquery` package combining this [Graph Store](https://github.com/ksmin23/langchain-bigquery-graph) with the Hybrid Search vector store in a single distribution
+
 ## References
 
 - [BigQuery SEARCH function](https://cloud.google.com/bigquery/docs/reference/standard-sql/search_functions#search)
