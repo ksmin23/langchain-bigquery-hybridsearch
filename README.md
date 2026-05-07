@@ -98,7 +98,7 @@ The store works with both `langchain-google-genai` (which uses the `task_type` k
 ### Instance-level configuration
 
 ```python
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_google_vertexai import VertexAIEmbeddings
 from langchain_bigquery_hybridsearch import BigQueryHybridSearchVectorStore
 
 # Q&A retrieval — same task type on both sides
@@ -106,7 +106,7 @@ store = BigQueryHybridSearchVectorStore(
     project_id="my-project",
     dataset_name="my_dataset",
     table_name="docs",
-    embedding=GoogleGenerativeAIEmbeddings(model="gemini-embedding-001"),
+    embedding=VertexAIEmbeddings(model="gemini-embedding-001"),
     query_task_type="QUESTION_ANSWERING",
     document_task_type="QUESTION_ANSWERING",
     hybrid_search_mode="rrf",
