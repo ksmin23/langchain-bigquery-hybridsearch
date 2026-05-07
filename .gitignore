@@ -10,3 +10,6 @@ build/
 .pytest_cache/
 .ruff_cache/
 *.egg
+
+# Serena
+.serena/
